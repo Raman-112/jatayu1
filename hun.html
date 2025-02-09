@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drone Delivery Tracking</title>
+    
+    <!-- Firebase (if needed for future updates) -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    
+    <!-- Google Maps API -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCz-In6dZs9aXMyUgRWJ8cJzg_vrd3hv6A&callback=initMap"></script>
+
+    <link rel="stylesheet" href="styles.css">
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .container {
+            width: 75%;
+            margin: auto;
+            text-align: left;
+        }
+        #googleMap {
+            width: 100%;
+            height: 500px;
+            margin-bottom: 20px;
+        }
+        .info {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        /* Chatbot styles */
+        .chatbot-container {
+            width: 20%;
+            position: fixed;
+            top: 50px;
+            right: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+            background: white;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            height: 450px;
+            overflow: hidden;
+        }
+        .chat-header {
+            background: #0078ff;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            border-radius: 10px 10px 0 0;
+        }
+        .chat-box {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .chat-input {
+            display: flex;
+            padding: 5px;
+            border-top: 1px solid #ddd;
+        }
+        .chat-input input {
+            flex-grow: 1;
+            padding: 5px;
+            border: none;
+            outline: none;
+        }
+        .chat-input button {
+            background: #0078ff;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .user-message, .bot-message {
+            padding: 5px;
+            margin: 5px 0;
+            border-radius: 5px;
+            max-width: 80%;
+        }
+        .user-message {
+            background: #d1ecf1;
+            align-self: flex-end;
+        }
+        .bot-message {
+            background: #f8d7da;
+            align-self: flex-start;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Drone Delivery Tracking</h1>
+        <div id="googleMap"></div>
+        <div class="info">
+            <p><strong>Source Location:</strong> <span id="sourceLocation">Fetching location...</span></p>
+            <p><strong>Destination Location:</strong> <span id="destinationLocation">Click on Map</span></p>
+            <p><strong>Distance:</strong> <span id="distance">0</span> km</p>
+            <p><strong>Estimated Time:</strong> <span id="estimatedTime">0</span> min</p>
+        </div>
+        <button id="startDelivery" disabled>Start Delivery</button>
+    </div>
+
+    <!-- Chatbot -->
+    <div class="chatbot-container">
+        <div class="chat-header">Chatbot</div>
+        <div class="chat-box" id="chatBox"></div>
+        <div class="chat-input">
+            <input type="text" id="userInput" placeholder="Ask something...">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let map, sourceMarker, destinationMarker, routeLine;
+        let sourceLocation = null;
+        let destinationLocation = null;
+        const droneSpeed = 60; // Drone speed: 50 km/h
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById("googleMap"), {
+                zoom: 12,
+                center: { lat: 30.5244, lng: 76.6593 },
+                mapTypeId: "roadmap"
+            });
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    sourceLocation = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                    document.getElementById("sourceLocation").innerText = `${sourceLocation.lat.toFixed(5)}, ${sourceLocation.lng.toFixed(5)}`;
+                    sourceMarker = new google.maps.Marker({
+                        position: sourceLocation,
+                        map: map,
+                        title: "Your Location (Source)",
+                        icon: "http://maps.google.com/mapfiles/ms/icons/green-dot.png"
+                    });
+                    map.setCenter(sourceLocation);
+                }, () => {
+                    alert("Geolocation permission denied. Please allow access to your location.");
+                });
+            } else {
+                alert("Geolocation is not supported by this browser.");
+            }
+
+            map.addListener("click", (event) => {
+                if (!sourceLocation) {
+                    alert("Please allow location access first.");
+                    return;
+                }
+                if (destinationMarker) destinationMarker.setMap(null);
+                destinationLocation = {
+                    lat: event.latLng.lat(),
+                    lng: event.latLng.lng(),
+                };
+                document.getElementById("destinationLocation").innerText = `${destinationLocation.lat.toFixed(5)}, ${destinationLocation.lng.toFixed(5)}`;
+                destinationMarker = new google.maps.Marker({
+                    position: destinationLocation,
+                    map: map,
+                    title: "Destination Location",
+                    icon: "http://maps.google.com/mapfiles/ms/icons/red-dot.png"
+                });
+                drawRoute();
+            });
+        }
+
+        function drawRoute() {
+            if (!sourceLocation || !destinationLocation) return;
+            if (routeLine) routeLine.setMap(null);
+
+            routeLine = new google.maps.Polyline({
+                path: [sourceLocation, destinationLocation],
+                geodesic: true,
+                strokeColor: "#ff5733",
+                strokeOpacity: 1.0,
+                strokeWeight: 3,
+            });
+            routeLine.setMap(map);
+
+            const distance = calculateDistance(sourceLocation, destinationLocation);
+            document.getElementById("distance").innerText = (distance * 1000).toFixed(2);
+            document.getElementById("estimatedTime").innerText = (distance * 1000 / droneSpeed).toFixed(2);
+            document.getElementById("startDelivery").disabled = false;
+        }
+
+        function calculateDistance(loc1, loc2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (loc2.lat - loc1.lat) * Math.PI / 180;
+            const dLng = (loc2.lng - loc1.lng) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(loc1.lat * Math.PI / 180) * Math.cos(loc2.lat * Math.PI / 180) *
+                      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // Distance in km
+        }
+
+        function sendMessage() {
+            let input = document.getElementById("userInput").value;
+            if (input.trim() === "") return;
+            let chatBox = document.getElementById("chatBox");
+
+            chatBox.innerHTML += `<div class="user-message">${input}</div>`;
+
+            setTimeout(() => {
+                let response = "I am a simple chatbot. How can I help you?";
+                chatBox.innerHTML += `<div class="bot-message">${response}</div>`;
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }, 500);
+
+            document.getElementById("userInput").value = "";
+        }
+    </script>
+</body>
+</html>

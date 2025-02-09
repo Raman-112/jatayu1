@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drone Delivery Tracking with AI Chat</title>
+    
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    
+    <!-- Google Maps API -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCz-In6dZs9aXMyUgRWJ8cJzg_vrd3hv6A&callback=initMap"></script>
+
+    <style>
+        /* Original Map Page Styles */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            width: 80%;
+            margin: auto;
+            padding: 20px;
+        }
+        #googleMap {
+            width: 100%;
+            height: 500px;
+            margin-bottom: 20px;
+        }
+        .info {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        /* Chatbot Styles */
+        .chat-toggle {
+            width: 60px;
+            height: 60px;
+            background: #007bff;
+            border-radius: 50%;
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease-in-out;
+            border: none;
+            outline: none;
+            z-index: 1000;
+        }
+
+        .chat-toggle:hover {
+            transform: scale(1.15);
+            background: #0056b3;
+        }
+
+        .chat-container {
+            width: 350px;
+            position: fixed;
+            left: -400px;
+            bottom: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            transition: left 0.4s ease-in-out;
+            opacity: 0;
+            visibility: hidden;
+            z-index: 1000;
+        }
+
+        .chat-container.active {
+            left: 20px;
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .chat-box {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 12px;
+            background: #fafafa;
+            text-align: left;
+            border-radius: 8px;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+
+        #userQuery {
+            width: 72%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            outline: none;
+            font-size: 14px;
+        }
+
+        .close-chat {
+            text-align: right;
+            cursor: pointer;
+            color: red;
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Chatbot Elements -->
+    <div class="chat-toggle" onclick="toggleChat()">💬</div>
+    <div class="chat-container" id="chat-container">
+        <div class="close-chat" onclick="toggleChat()">&times;</div>
+        <h2>🤖 AI Chatbot - Ask Me Anything</h2>
+        <div class="chat-box" id="chat-history"></div>
+        <input type="text" id="userQuery" placeholder="Type your question...">
+        <button onclick="askGemini()">Send</button>
+    </div>
+
+    <!-- Original Map Content -->
+    <div class="container">
+        <h1>Drone Delivery Tracking</h1>
+        <div id="googleMap"></div>
+        <div class="info">
+            <p><strong>Source Location:</strong> <span id="sourceLocation">Click on Map</span></p>
+            <p><strong>Destination Location:</strong> <span id="destinationLocation">Click on Map</span></p>
+            <p><strong>Distance:</strong> <span id="distance">0</span> m</p>
+            <p><strong>Estimated Time:</strong> <span id="estimatedTime">0</span> min</p>
+        </div>
+        <button id="startDelivery" disabled>Start Delivery</button>
+    </div>
+
+    <script>
+        // Original Map Script
+        let map, sourceMarker, destinationMarker, routeLine;
+        let sourceLocation = null;
+        let destinationLocation = null;
+        const droneSpeed = 833.33;
+        let selectingSource = true;
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById("googleMap"), {
+                zoom: 8,
+                center: { lat: 30.5244, lng: 76.6593 },
+                mapTypeId: "roadmap"
+            });
+
+            map.addListener("click", (event) => {
+                if (selectingSource) {
+                    if (sourceMarker) sourceMarker.setMap(null);
+                    sourceLocation = {
+                        lat: event.latLng.lat(),
+                        lng: event.latLng.lng(),
+                    };
+                    document.getElementById("sourceLocation").innerText = 
+                        `${sourceLocation.lat.toFixed(5)}, ${sourceLocation.lng.toFixed(5)}`;
+                    sourceMarker = new google.maps.Marker({
+                        position: sourceLocation,
+                        map: map,
+                        title: "Source Location",
+                        icon: "http://maps.google.com/mapfiles/ms/icons/green-dot.png"
+                    });
+                } else {
+                    if (destinationMarker) destinationMarker.setMap(null);
+                    destinationLocation = {
+                        lat: event.latLng.lat(),
+                        lng: event.latLng.lng(),
+                    };
+                    document.getElementById("destinationLocation").innerText = 
+                        `${destinationLocation.lat.toFixed(5)}, ${destinationLocation.lng.toFixed(5)}`;
+                    destinationMarker = new google.maps.Marker({
+                        position: destinationLocation,
+                        map: map,
+                        title: "Destination Location",
+                        icon: "http://maps.google.com/mapfiles/ms/icons/red-dot.png"
+                    });
+                    drawRoute();
+                }
+                selectingSource = !selectingSource;
+            });
+        }
+
+        function drawRoute() {
+            if (!sourceLocation || !destinationLocation) return;
+
+            if (routeLine) routeLine.setMap(null);
+
+            routeLine = new google.maps.Polyline({
+                path: [sourceLocation, destinationLocation],
+                geodesic: true,
+                strokeColor: "#ff5733",
+                strokeOpacity: 1.0,
+                strokeWeight: 3,
+            });
+            routeLine.setMap(map);
+
+            const distance = calculateDistance(sourceLocation, destinationLocation);
+            document.getElementById("distance").innerText = (distance * 1000).toFixed(2);
+            document.getElementById("estimatedTime").innerText = (distance * 1000 / droneSpeed).toFixed(2);
+            document.getElementById("startDelivery").disabled = false;
+        }
+
+        function calculateDistance(loc1, loc2) {
+            const R = 6371;
+            const dLat = (loc2.lat - loc1.lat) * Math.PI / 180;
+            const dLng = (loc2.lng - loc1.lng) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(loc1.lat * Math.PI / 180) * Math.cos(loc2.lat * Math.PI / 180) *
+                      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        // Chatbot Script
+        function toggleChat() {
+            const chatContainer = document.getElementById("chat-container");
+            chatContainer.classList.toggle("active");
+        }
+        
+        async function askGemini() {
+            const userInput = document.getElementById("userQuery").value;
+            const chatHistory = document.getElementById("chat-history");
+            const apiKey = "AIzaSyA7arhMYpcJZEg-6smm9PgKRqdr7Kq9fcQ";
+
+            if (!userInput.trim()) {
+                alert("Please enter a question.");
+                return;
+            }
+
+            chatHistory.innerHTML += `<p><strong>👤 You:</strong> ${userInput}</p>`;
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        contents: [{ 
+                            parts: [{ text: `User's Question: ${userInput}. Respond with detailed, professional, structured information.` }] 
+                        }]
+                    })
+                });
+
+                const result = await response.json();
+                const answer = result?.candidates?.[0]?.content?.parts?.[0]?.text || "I'm sorry, I couldn't retrieve an answer.";
+
+                chatHistory.innerHTML += `<p><strong>🤖 AI:</strong> ${answer}</p>`;
+            } catch (error) {
+                chatHistory.innerHTML += `<p><strong>🤖 AI:</strong> ❌ Error fetching response.</p>`;
+                console.error("Gemini API Error:", error);
+            }
+
+            document.getElementById("userQuery").value = "";
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+    </script>
+</body>
+</html>
